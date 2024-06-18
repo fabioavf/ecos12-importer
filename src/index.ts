@@ -2,6 +2,7 @@ import { Disciplina, Grade, Periodo } from './types';
 import axios from 'axios';
 import data from './scrapedData.json';
 import { ImportDisciplina, ImportGrade, ImportPeriodo } from './importTypes';
+import { ReturnDisciplina } from './returnTypes';
 
 /* --------------------------------- Config --------------------------------- */
 
@@ -12,39 +13,16 @@ let disciplinasIds: string[] = [];
 
 /* ---------------------------------- Main ---------------------------------- */
 
-// console.log(data[0].periodos[0].disciplinas[0]);
+data.forEach(async (grade: ImportGrade) => {
+    const periodoResults = await Promise.all(grade.periodos.map(importPeriodo));
 
-// let disciplina = {
-//     nome: 'Cálculo I',
-//     codDisciplina: 'MAT001',
-//     cargaHoraria: 96,
-//     ementa: 'Funções. Limite e continuidade. Derivada. Integral. Integral imprópria.',
-// };
-
-// insertDisciplina(disciplina)
-//     .then(({ data }) => {
-//         console.log(data);
-//     })
-//     .catch((err) => {
-//         console.error(err.message);
-//     });
-
-// importDisciplina(data[0].periodos[0].disciplinas[0]);
-
-// getAllDisciplinas().then(({ data }) => {
-//     console.log(data);
-// });
-
-data.forEach((grade: ImportGrade) => {
-    periodosIds = [];
-
-    grade.periodos.forEach(importPeriodo);
+    console.log(periodoResults);
 
     const gradeToBeCreated: Grade = {
         ano: grade.ano,
         curso: grade.curso,
         idGrade: grade.idGrade,
-        periodos: periodosIds,
+        periodos: periodoResults,
     };
 
     insertGrade(gradeToBeCreated)
@@ -58,101 +36,86 @@ data.forEach((grade: ImportGrade) => {
 
 /* -------------------------------- Functions ------------------------------- */
 
-function importPeriodo(periodo: ImportPeriodo) {
-    disciplinasIds = [];
-
-    periodo.disciplinas.forEach(importDisciplina);
+async function importPeriodo(periodo: ImportPeriodo) {
+    const disciplinaResults = await Promise.all(periodo.disciplinas.map(importDisciplina));
 
     const periodoToBeCreated: Periodo = {
-        disciplinas: disciplinasIds,
+        disciplinas: disciplinaResults,
         idPeriodo: periodo.idPeriodo,
         periodo: periodo.idPeriodo,
     };
 
-    insertPeriodo(periodoToBeCreated)
+    // console.log(disciplinasIds);
+
+    return insertPeriodo(periodoToBeCreated)
         .then(({ data }) => {
-            periodosIds.push(data._id);
+            return data._id;
         })
         .catch((err) => {
             console.error(err.response.data.message);
         });
 }
 
-function importDisciplina(disciplina: ImportDisciplina) {
-    let toBeCreated: Disciplina = {} as Disciplina;
+async function importDisciplina(disciplina: ImportDisciplina) {
+    let toBeCreated: Disciplina = {
+        nome: disciplina.nome,
+        codDisciplina: disciplina.codDisciplina,
+        cargaHoraria: disciplina.cargaHoraria,
+        ementa: disciplina.ementa,
+    };
+
+    let preRequisitosIds: string[] = [];
 
     if (disciplina.preRequisitos) {
         const requisitos: string[] = disciplina.preRequisitos.split('\n');
-        toBeCreated.preRequisitos = [];
 
-        requisitos.forEach((requisito) => {
-            findDisciplina(requisito)
-                .then(({ data }) => {
-                    // console.log(data);
-                    toBeCreated.preRequisitos!.push(data.data._id);
-                })
-                .catch((err) => {
-                    throw err.response.data.message;
-                });
-        });
+        // Map each requisito to a promise
+        const requisitoPromises = requisitos.map((requisito) => findDisciplina(requisito));
+
+        // Wait for all promises to resolve
+        const requisitoResults = await Promise.all(requisitoPromises);
+
+        // Extract the ids from the results
+        preRequisitosIds = requisitoResults.map(({ data }) => data.data._id);
+
+        toBeCreated.preRequisitos = preRequisitosIds;
     }
 
-    if (disciplina.coRequisito) {
-        findDisciplina(disciplina.coRequisito)
-            .then(({ data }) => {
-                toBeCreated.coRequisito = data.data._id;
-            })
-            .catch((err) => {
-                console.error(err.response.data.message);
-            });
-    }
-
-    toBeCreated.nome = disciplina.nome;
-    toBeCreated.codDisciplina = disciplina.codDisciplina;
-    toBeCreated.cargaHoraria = disciplina.cargaHoraria;
-    toBeCreated.ementa = disciplina.ementa;
-
-    // console.log({
-    //     codDisciplina: toBeCreated.codDisciplina,
-    //     preRequisitos: toBeCreated.preRequisitos,
-    // });
-
-    insertDisciplina(toBeCreated)
+    return insertDisciplina(toBeCreated)
         .then(({ data }) => {
-            disciplinasIds.push(data._id);
+            return data.data._id;
         })
         .catch((err) => {
-            throw err.response.data.message;
+            console.error(err.response.data.message);
         });
 }
 
 /* --------------------------- Auxiliary functions -------------------------- */
 
-async function getAllDisciplinas() {
-    return await api.get('/disciplinas');
+function getAllDisciplinas() {
+    return api.get('/disciplinas');
 }
 
-async function getAllGrades() {
-    return await api.get('/grades');
+function getAllGrades() {
+    return api.get('/grades');
 }
 
-async function getAllPeriodos() {
-    return await api.get('/periodos');
+function getAllPeriodos() {
+    return api.get('/periodos');
 }
 
-async function insertDisciplina(disciplina: Disciplina) {
-    // console.log(disciplina);
-    return await api.post('/disciplinas', disciplina);
+function insertDisciplina(disciplina: Disciplina) {
+    return api.post('/disciplinas', disciplina);
 }
 
-async function findDisciplina(codDisciplina: string) {
-    return await api.post('/findDisciplina', { codDisciplina: codDisciplina });
+function findDisciplina(codDisciplina: string) {
+    return api.post<ReturnDisciplina>('/findDisciplina', { codDisciplina: codDisciplina });
 }
 
-async function insertGrade(grade: Grade) {
-    return await api.post('/grades', grade);
+function insertGrade(grade: Grade) {
+    return api.post('/grades', grade);
 }
 
-async function insertPeriodo(periodo: Periodo) {
-    return await api.post('/periodos', periodo);
+function insertPeriodo(periodo: Periodo) {
+    return api.post('/periodos', periodo);
 }
